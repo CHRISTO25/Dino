@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Dino Fun Game 🎮</title>
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        width: 100vw;
+        font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        overflow: hidden;
+        touch-action: none;
+    }
+
+    #game-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    canvas {
+        width: 100%;
+        height: auto;
+        background: white;
+        display: block;
+    }
+
+    #flash {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(255, 0, 0, 0.6);
+        display: none;
+        pointer-events: none;
+        z-index: 5;
+    }
+
+    #overlay {
+        position: absolute;
+        top: 0; left: 0; 
+        width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.95);
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        z-index: 10;
+        padding: 20px;
+        box-sizing: border-box;
+    }
+
+    #friend-photo-container {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        margin-bottom: 25px;
+    }
+
+    #friend-photo-container img {
+        width: 220px;
+        height: 220px;
+        object-fit: cover;
+        border-radius: 0;
+        border: 8px solid #ffca28;
+        box-shadow: 0 0 40px rgba(255, 202, 40, 0.5), inset 0 0 15px rgba(0,0,0,0.5); 
+        animation: pulse 1.5s infinite alternate;
+    }
+
+    #players-strip {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        width: 100%;
+        margin-bottom: 30px;
+    }
+
+    .player-card {
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        border-radius: 15px;
+        padding: 15px;
+        width: 130px;
+        text-align: center;
+    }
+
+    .player-card img {
+        width: 100px;
+        height: 100px;
+        object-fit: contain;
+        display: block;
+        margin: 0 auto 10px auto;
+    }
+
+    .player-card span {
+        font-size: 16px;
+        font-weight: bold;
+        color: #ffca28;
+        text-transform: uppercase;
+    }
+
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        100% { transform: scale(1.05); }
+    }
+
+    #overlay h2 { font-size: 30px; margin: 0 0 10px 0; text-transform: uppercase; }
+    #finalScore { font-size: 24px; margin-bottom: 25px; font-weight: bold; }
+
+    button {
+        padding: 18px 60px;
+        font-size: 24px;
+        font-weight: bold;
+        background: #2ecc71;
+        color: white;
+        border: none;
+        border-radius: 50px;
+        cursor: pointer;
+        box-shadow: 0 6px 0 #27ae60;
+    }
+
+    button:active {
+        transform: translateY(4px);
+        box-shadow: 0 2px 0 #27ae60;
+    }
+</style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="flash"></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="overlay">
+        <div id="friend-photo-container">
+            <img src="friend.png" alt="Featured">
+        </div>
+
+        <div id="players-strip">
+            <div class="player-card">
+                <img src="dino.png" alt="Player">
+                <span>Player</span>
+            </div>
+            <div class="player-card">
+                <img src="cactus.png" alt="Enemy">
+                <span>Enemy</span>
+            </div>
+        </div>
+
+        <h2>Game Over!</h2>
+        <p id="finalScore"></p>
+        <button onclick="resetGame()">REPLAY</button>
+    </div>
+</div>
+
+<audio id="bgMusic" loop><source src="bg.mp3" type="audio/mpeg"></audio>
+<audio id="jumpSound"><source src="jump.mp3" type="audio/mpeg"></audio>
+<audio id="hitSound"><source src="hit.mp3" type="audio/mpeg"></audio>
+<audio id="boomSound"><source src="boom.mp3" type="audio/mpeg"></audio>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const flash = document.getElementById("flash");
+const overlay = document.getElementById("overlay");
+const finalScoreText = document.getElementById("finalScore");
+
+const LOGICAL_WIDTH = 900;
+const LOGICAL_HEIGHT = 450;
+
+function setupCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = LOGICAL_WIDTH * dpr;
+    canvas.height = LOGICAL_HEIGHT * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+}
+
+const GROUND_Y = 270;
+const GRAVITY = 0.8;
+const JUMP_FORCE = -18;
+
+const dinoImg = new Image(); dinoImg.src = "dino.png";
+const cactusImg = new Image(); cactusImg.src = "cactus.png";
+
+const music = document.getElementById("bgMusic");
+const jumpSound = document.getElementById("jumpSound");
+const hitSound = document.getElementById("hitSound");
+const boomSound = document.getElementById("boomSound");
+
+// Global Timeout references
+let flashTimeout;
+let boomTimeout;
+
+class Dino {
+    constructor() {
+        this.x = 80;
+        this.y = GROUND_Y;
+        this.width = 140;
+        this.height = 140;
+        this.velocityY = 0;
+        this.isJumping = false;
+    }
+    jump() {
+        if (!this.isJumping && !gameOver) {
+            this.velocityY = JUMP_FORCE;
+            this.isJumping = true;
+            jumpSound.currentTime = 0;
+            jumpSound.play().catch(()=>{});
+            if (music.paused) music.play().catch(()=>{});
+        }
+    }
+    update() {
+        this.velocityY += GRAVITY;
+        this.y += this.velocityY;
+        if (this.y >= GROUND_Y) { this.y = GROUND_Y; this.isJumping = false; }
+    }
+    draw() { ctx.drawImage(dinoImg, this.x, this.y, this.width, this.height); }
+    getHitbox() { return { x: this.x + 35, y: this.y + 30, width: this.width - 70, height: this.height - 40 }; }
+}
+
+class Cactus {
+    constructor(speed) {
+        this.x = LOGICAL_WIDTH;
+        this.width = 80;
+        this.height = 110;
+        this.y = GROUND_Y + 25;
+        this.speed = speed;
+    }
+    update() { this.x -= this.speed; }
+    draw() { ctx.drawImage(cactusImg, this.x, this.y, this.width, this.height); }
+    getHitbox() { return { x: this.x + 15, y: this.y + 15, width: this.width - 30, height: this.height - 25 }; }
+}
+
+let dino = new Dino();
+let obstacles = [];
+let frame = 0;
+let score = 0;
+let speed = 7;
+let gameOver = false;
+
+function update() {
+    if (gameOver) return;
+    frame++;
+    if(frame % 2 === 0) score++;
+    if (frame % 80 === 0) {
+        obstacles.push(new Cactus(speed));
+        if(speed < 22) speed += 0.3;
+    }
+    dino.update();
+    obstacles.forEach((obs, i) => {
+        obs.update();
+        const a = dino.getHitbox();
+        const b = obs.getHitbox();
+        if (a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y) {
+            gameOver = true;
+            
+            // Handle Flash with timeout reference
+            flash.style.display = "block";
+            flashTimeout = setTimeout(() => flash.style.display = "none", 150);
+            
+            music.pause();
+            hitSound.play().catch(()=>{});
+            
+            // Handle Boom with timeout reference and check
+            boomTimeout = setTimeout(() => {
+                if (gameOver) { // Only play if we haven't restarted
+                    boomSound.currentTime = 0;
+                    boomSound.play().catch(()=>{});
+                }
+            }, 300);
+            
+            finalScoreText.innerText = "SCORE: " + score;
+            overlay.style.display = "flex";
+        }
+        if (obs.x + obs.width < 0) obstacles.splice(i, 1);
+    });
+}
+
+function draw() {
+    ctx.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y + 130);
+    ctx.lineTo(LOGICAL_WIDTH, GROUND_Y + 130);
+    ctx.stroke();
+    dino.draw();
+    obstacles.forEach(o => o.draw());
+    ctx.fillStyle = "black";
+    ctx.font = "bold 30px sans-serif";
+    ctx.fillText("SCORE: " + score, 40, 50);
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+setupCanvas();
+window.addEventListener('resize', setupCanvas);
+canvas.addEventListener("touchstart", (e) => { e.preventDefault(); dino.jump(); });
+canvas.addEventListener("mousedown", () => { if(!gameOver) dino.jump(); });
+
+function resetGame() {
+    // 1. Clear any pending timers immediately
+    clearTimeout(flashTimeout);
+    clearTimeout(boomTimeout);
+    
+    // 2. Stop the boom sound if it started playing
+    boomSound.pause();
+    boomSound.currentTime = 0;
+
+    // 3. Reset UI
+    overlay.style.display = "none";
+    flash.style.display = "none";
+    
+    // 4. Reset Game State
+    dino = new Dino();
+    obstacles = [];
+    frame = 0; 
+    score = 0; 
+    speed = 7;
+    gameOver = false;
+    
+    // Restart music if it was playing
+    music.currentTime = 0;
+    music.play().catch(()=>{});
+}
+
+let loaded = 0;
+const check = () => { if(++loaded >= 2) loop(); };
+dinoImg.onload = check;
+cactusImg.onload = check;
+</script>
+</body>
+</html>
